@@ -1,0 +1,257 @@
+classdef SmoothScriptGenerator < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure            matlab.ui.Figure
+        ChooseFileButton    matlab.ui.control.Button
+        STARTButton         matlab.ui.control.Button
+        ChosenPathTextArea  matlab.ui.control.TextArea
+        ProcessingLabel     matlab.ui.control.Label
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Button pushed function: ChooseFileButton
+        function ChooseFileButtonPushed(app, event)
+            global baseName
+            global folder
+            
+            %select file path
+            [baseName, folder] = uigetfile('*.funscript');
+            ExPath = fullfile(baseName);
+            app.ChosenPathTextArea.Value = ExPath;
+        end
+
+        % Button pushed function: STARTButton
+        function STARTButtonPushed(app, event)
+            global baseName
+            global folder      
+            
+            set(app.ProcessingLabel, 'Text', 'Working...')
+            set(app.STARTButton, 'Enable', 'off')
+            set(app.ChooseFileButton, 'Enable', 'off')
+            
+            pause(1);
+                                   
+            %recommended value is 10, lower values create more smoothed and
+            %greater in size script
+            msinterval = 10;
+            
+            %[baseName, folder] = uigetfile('*.funscript');
+            fullFileName = fullfile(folder, baseName);
+            cd(folder);
+            mkdir _Output;
+            
+            %load file
+            fileID = fopen(baseName);
+            data = fgetl(fileID);
+            
+            %checks if script was made with JoyFunScripter - 1 mean yes, 0 mean no
+            TF=contains(data,"rawActions");
+            
+            if TF==1
+                %% Code for scripts made with JoyFunScripter
+                
+                [Adata] = strsplit(data,{'},{"pos":',',"at":'},'CollapseDelimiters',true); 
+            
+                %column after which one all data is junk
+                IndexRawData = find(contains(Adata,'rawActions')); 
+            
+                %this is all information about funscript where scrpitngMode needs to be
+                %changed if script wasn't made with on-fly method, otherwise it should
+                %remain as it is
+                FileInfo = string(Adata(1));
+            
+                Xdata = Adata;
+            
+                CellFirstPos = strsplit(replace(FileInfo,':[{"pos":',' '));
+                FirstPos = cellstr(CellFirstPos(:,end));
+            
+                %replaces script's info with first position of script
+                Xdata(1) = FirstPos;
+            
+                LastFrame = string(Xdata{IndexRawData});
+                CellLastFrame = strsplit(replace(LastFrame,'}],"rawActions":[{"pos":',' '));
+                LastFrame = cellstr(CellLastFrame(1));
+            
+                %replaces rawActions cell with last frame
+                Xdata(IndexRawData) = LastFrame;
+            
+                a = IndexRawData+1;
+                n = size(Xdata);
+                b = n(2);
+            
+                %cleans all rawActions
+                Xdata(:,a:b) = [];
+                CleanData = reshape(Xdata,[],(IndexRawData/2))';
+            
+                %conversion of CleanData from cell to double
+                m = zeros(size(CleanData,1),size(CleanData,2));
+                m = str2double(CleanData);
+            
+                %script smoothing
+                x = m(:,2);
+                y = m(:,1);
+                xi = m(1,2):msinterval:m(end,2);
+                G = round(interp1(x,y,xi,'pchip')); 
+                OutputArray = num2cell([G;xi]');
+            
+                %temporary file to help convert interpolated data to funscript format
+                writecell(OutputArray, 'temp.txt');
+                tempStr = fileread('temp.txt');
+                delete 'temp.txt';
+            
+                %delete extra newlines at the end of tempStr
+                tempStr=tempStr(1:end-2);
+            
+                %convert raw data to funscript format
+                StrA = regexprep(tempStr,'\s+',' ');
+                StrB = replace(StrA,',',',"at":');
+                StrA = replace(StrB,' ','},{"pos":');
+                StrX = extractBefore(data, '"rawActions":[{"pos":');
+                StrY = replace(StrX, '"scriptingMode":0', '"scriptingMode":1');
+                OutputString = strcat(StrY, '"rawActions":[{"pos":', StrA, '}]}');
+            
+                %save interpolated funscript
+                Newpath = strcat(folder,'\_Output');
+                cd(Newpath);
+                fid = fopen(baseName,'wt');
+                fwrite(fid,OutputString);
+                
+            else
+                %% Code for scripts made with programs other then JoyFunScripter
+                
+                [Adata] = strsplit(data,{'},{"pos":',',"at":'},'CollapseDelimiters',true); 
+                
+                %column after which one all data is junk
+                LastColumn = find(contains(Adata,'}]}'));
+            
+                %this is all information about funscript that should
+                %remain as it is
+                FileInfo = string(Adata(1));
+            
+                Xdata = Adata;
+            
+                CellFirstPos = strsplit(replace(FileInfo,':[{"pos":',' '));
+                FirstPos = cellstr(CellFirstPos(:,end));
+            
+                %replaces script's info with first position of script
+                Xdata(1) = FirstPos;
+            
+                LastFrame = string(Xdata{end});
+                CellLastFrame = strsplit(replace(LastFrame,'}]}',''));
+                LastFrame = cellstr(CellLastFrame(1));
+            
+                %replaces last cell with last frame
+                Xdata(end) = LastFrame;
+                
+                CleanData = reshape(Xdata,[],(LastColumn/2))'; 
+            
+                %conversion of CleanData from cell to double
+                m = zeros(size(CleanData,1),size(Xdata,2));
+                m = str2double(CleanData);
+            
+                %script smoothing
+                x = m(:,2);
+                y = m(:,1);
+                xi = m(1,2):msinterval:m(end,2);
+                G = round(interp1(x,y,xi,'pchip')); 
+                OutputArray = num2cell([G;xi]');
+            
+                %temporary file to help convert interpolated data to funscript format
+                writecell(OutputArray, 'temp.txt');
+                tempStr = fileread('temp.txt');
+                delete 'temp.txt';
+            
+                %delete extra newlines at the end of tempStr
+                tempStr=tempStr(1:end-2);
+            
+                %convert raw data to funscript format
+                StrA = regexprep(tempStr,'\s+',' ');
+                StrB = replace(StrA,',',',"at":');
+                StrA = replace(StrB,' ','},{"pos":');
+                StrX = extractBefore(FileInfo, '"actions":[{"pos":');
+                OutputString = strcat(StrX, '"actions":[{"pos":', StrA, '}]}');
+            
+                %save interpolated funscript
+                Newpath = strcat(folder,'\_Output');
+                cd(Newpath);
+                fid = fopen(baseName,'wt');
+                fwrite(fid,OutputString);
+            end
+            
+            fclose('all');
+            
+            set(app.ProcessingLabel, 'Text', 'Done!')
+            set(app.STARTButton, 'Enable', 'on')
+            set(app.ChooseFileButton, 'Enable', 'on')
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Position = [100 100 524 187];
+            app.UIFigure.Name = 'MATLAB App';
+
+            % Create ChooseFileButton
+            app.ChooseFileButton = uibutton(app.UIFigure, 'push');
+            app.ChooseFileButton.ButtonPushedFcn = createCallbackFcn(app, @ChooseFileButtonPushed, true);
+            app.ChooseFileButton.BackgroundColor = [1 1 0];
+            app.ChooseFileButton.Position = [395 62 100 22];
+            app.ChooseFileButton.Text = 'Choose File';
+
+            % Create STARTButton
+            app.STARTButton = uibutton(app.UIFigure, 'push');
+            app.STARTButton.ButtonPushedFcn = createCallbackFcn(app, @STARTButtonPushed, true);
+            app.STARTButton.BackgroundColor = [0.3922 0.8314 0.0745];
+            app.STARTButton.Position = [395 23 100 22];
+            app.STARTButton.Text = 'START';
+
+            % Create ChosenPathTextArea
+            app.ChosenPathTextArea = uitextarea(app.UIFigure);
+            app.ChosenPathTextArea.Editable = 'off';
+            app.ChosenPathTextArea.Position = [27 99 468 60];
+
+            % Create ProcessingLabel
+            app.ProcessingLabel = uilabel(app.UIFigure);
+            app.ProcessingLabel.HorizontalAlignment = 'center';
+            app.ProcessingLabel.Position = [644 23 76 22];
+            app.ProcessingLabel.Text = ' ';
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = SmoothScriptGenerator
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
